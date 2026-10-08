@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "daot_berserk",
+  "version": "${version}",
+  "name": "DAOT Berserk Mode",
+  "description": "Addon for Danny's AOT: makes the Attack Titan's Berserk ability (slot 9) actually work.",
+  "authors": ["You"],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["dev.berserk.daotberserk.BerserkMod"],
+    "client": ["dev.berserk.daotberserk.client.BerserkClient"]
+  },
+  "mixins": ["daot_berserk.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-api": "*",
+    "dannys-aot": "*"
+  }
+}

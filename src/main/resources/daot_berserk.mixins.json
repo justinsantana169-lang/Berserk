@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.berserk.daotberserk.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "AttackTitanEntityMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
