@@ -37,9 +37,13 @@ public abstract class AttackTitanEntityMixin {
     @Inject(method = "triggerAbility(I)V", at = @At("HEAD"), cancellable = true, remap = false)
     private void daotBerserk$onAbility(int ability, CallbackInfo ci) {
         if (ability != BerserkManager.BERSERK_ABILITY) return;
-        ci.cancel(); // never fall through to the (empty) vanilla handling
 
         LivingEntity self = (LivingEntity) (Object) this;
+        // ATTACK TITAN ONLY. Founding, Ogre, Triple-T and Test shifters all inherit from this class,
+        // so require the exact class and leave every other titan's behaviour untouched.
+        if (!self.getClass().getName().equals("daot.AttackTitanEntity")) return;
+
+        ci.cancel(); // never fall through to the (empty) vanilla handling
         if (self.getWorld().isClient) return;
         if (isDefeated() || isRoaring() || isKnocked() || isTransforming() || isDismounting()) return;
 
@@ -67,3 +71,4 @@ public abstract class AttackTitanEntityMixin {
         if (BerserkConfig.FREE_STAMINA && BerserkManager.isBerserk(this)) ci.cancel();
     }
 }
+
