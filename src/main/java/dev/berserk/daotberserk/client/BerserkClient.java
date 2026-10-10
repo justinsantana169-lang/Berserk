@@ -15,9 +15,16 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.math.MathHelper;
 
+import java.lang.reflect.Method;
+
 /** Client side: red screen edges + a flaming Berserk bar. Activation uses Danny's AOT's own ability key. */
 public class BerserkClient implements ClientModInitializer {
     private static final int READY_TICKS = 70;
+
+    // ---- bar layout (tweak these) ----
+    private static final int BAR_W = 72;               // same width as Danny's stamina bar
+    private static final int BAR_H = 9;
+    private static final int GAP_ABOVE_STAMINA = 7;    // pixels between this bar and the stamina bar
 
     private static boolean active;
     private static int remaining;
@@ -99,8 +106,33 @@ public class BerserkClient implements ClientModInitializer {
         }
     }
 
+    // Danny's AOT computes where its stamina bar sits (it moves with armor/air rows), so ask it.
+    private static Method rightBarYMethod;
+    private static boolean rightBarYResolved;
+
+    private static int staminaBarY(MinecraftClient mc, DrawContext ctx, int fallback) {
+        if (!rightBarYResolved) {
+            rightBarYResolved = true;
+            try {
+                rightBarYMethod = Class.forName("daot.FancyBar")
+                        .getDeclaredMethod("rightBarY", MinecraftClient.class, DrawContext.class);
+                rightBarYMethod.setAccessible(true);
+            } catch (Throwable t) {
+                rightBarYMethod = null;
+            }
+        }
+        if (rightBarYMethod != null) {
+            try {
+                return (int) rightBarYMethod.invoke(null, mc, ctx);
+            } catch (Throwable t) {
+                rightBarYMethod = null;
+            }
+        }
+        return fallback;
+    }
+
     private static void drawBar(DrawContext ctx, MinecraftClient mc, int sw, int sh, float t, float pd) {
-        final int bw = 150, bh = 11;
+        final int bw = BAR_W, bh = BAR_H;
         // mode 0 = berserk active, 1 = recharging, 2 = ready flash
         int mode = active ? 0 : (cooldown > 0 ? 1 : 2);
         float frac;
@@ -113,25 +145,26 @@ public class BerserkClient implements ClientModInitializer {
         boolean low = mode == 0 && remaining < 100; // last 5 seconds
         float pulse = 0.5f + 0.5f * MathHelper.sin(t * 0.3f);
 
-        int x = (sw - bw) / 2;
-        int y = sh - 104; // above the hotbar and Danny's ability bar; change this number to move it
-        if (mode == 0) { // the bar shakes with rage, more when time is almost up
-            float j = low ? 1.6f : 0.7f;
+        // sit directly above Danny's stamina bar, flush with the right edge of the hotbar
+        int staminaY = staminaBarY(mc, ctx, sh - 45);
+        int x = sw / 2 + 91 - bw;
+        int y = staminaY - bh - GAP_ABOVE_STAMINA;
+        if (mode == 0) { // slight rage shake, more when time is almost up
+            float j = low ? 1.0f : 0.5f;
             x += Math.round(MathHelper.sin(t * 2.3f) * j);
             y += Math.round(MathHelper.cos(t * 3.1f) * j * 0.6f);
         }
 
         // outer fire glow
         if (burning) {
-            for (int i = 4; i >= 1; i--) {
-                ctx.fill(x - i * 2, y - i * 2, x + bw + i * 2, y + bh + i * 2, argb((int) (10 + 14 * pulse), 255, 70, 0));
+            for (int i = 3; i >= 1; i--) {
+                ctx.fill(x - i * 2, y - i * 2, x + bw + i * 2, y + bh + i * 2, argb((int) (8 + 12 * pulse), 255, 70, 0));
             }
         }
 
         // frame + background
         int border = burning ? argb(255, lerp(120, 255, pulse), lerp(20, 110, pulse), 0) : argb(255, 70, 60, 60);
-        ctx.fill(x - 2, y - 2, x + bw + 2, y + bh + 2, border);
-        ctx.fill(x - 1, y - 1, x + bw + 1, y + bh + 1, 0xFF0B0505);
+        ctx.fill(x - 1, y - 1, x + bw + 1, y + bh + 1, border);
         ctx.fillGradient(x, y, x + bw, y + bh, 0xFF1E0B08, 0xFF060202);
 
         // fill: deep red at the left -> white-hot yellow at the leading edge, flickering
@@ -156,14 +189,14 @@ public class BerserkClient implements ClientModInitializer {
             ctx.fillGradient(x + cx, y, x + ex, y + bh, top, bot);
         }
         if (fw > 0) ctx.fill(x, y, x + fw, y + 1, argb(80, 255, 255, 255)); // glossy top edge
-        for (int k = 1; k < 10; k++) ctx.fill(x + bw * k / 10, y, x + bw * k / 10 + 1, y + bh, 0x66000000);
+        for (int k = 1; k < 10; k++) ctx.fill(x + bw * k / 10, y, x + bw * k / 10 + 1, y + bh, 0x55000000);
 
         // animated flame tongues licking up off the bar
         if (burning) {
             for (int cx = 0; cx < fw; cx += 3) {
                 float ph = t * 0.55f + cx * 0.37f;
                 float n = (0.5f + 0.5f * MathHelper.sin(ph)) * (0.65f + 0.35f * MathHelper.sin(ph * 1.7f + cx));
-                int th = (int) (2 + 8 * n * (mode == 2 ? 0.8f : 1f));
+                int th = (int) (2 + 6 * n * (mode == 2 ? 0.8f : 1f));
                 int x2 = x + Math.min(cx + 2, fw);
                 ctx.fillGradient(x + cx, y - th, x2, y, argb(0, 255, 190, 40), argb(210, 255, 80, 0));
                 int ih = (int) (th * 0.55f);
@@ -174,17 +207,17 @@ public class BerserkClient implements ClientModInitializer {
         // glowing leading edge
         if (fw > 0) {
             int lx = x + fw;
-            ctx.fill(lx - 5, y - 3, lx + 4, y + bh + 3, argb(burning ? 38 : 16, 255, 200, 80));
-            ctx.fill(lx - 2, y - 1, lx + 1, y + bh + 1, burning ? argb(255, 255, 245, 200) : argb(200, 230, 170, 120));
-            if (burning) ctx.fillGradient(lx - 1, y - 13, lx + 1, y, argb(0, 255, 220, 100), argb(230, 255, 240, 170));
+            ctx.fill(lx - 3, y - 2, lx + 3, y + bh + 2, argb(burning ? 38 : 16, 255, 200, 80));
+            ctx.fill(lx - 1, y, lx + 1, y + bh, burning ? argb(255, 255, 245, 200) : argb(200, 230, 170, 120));
+            if (burning) ctx.fillGradient(lx - 1, y - 9, lx + 1, y, argb(0, 255, 220, 100), argb(230, 255, 240, 170));
         }
 
         // rising embers
         if (burning && fw > 6) {
-            for (int i = 0; i < 18; i++) {
+            for (int i = 0; i < 12; i++) {
                 float ph = (t * (0.010f + (i % 5) * 0.004f) + i * 0.137f) % 1f;
-                int px = x + (int) (fw * hash(i)) + (int) (MathHelper.sin(t * 0.2f + i) * 3);
-                int ey = y - 3 - (int) (ph * 28);
+                int px = x + (int) (fw * hash(i)) + (int) (MathHelper.sin(t * 0.2f + i) * 2);
+                int ey = y - 2 - (int) (ph * 20);
                 int sz = (i % 3 == 0) ? 2 : 1;
                 ctx.fill(px, ey, px + sz, ey + sz, argb((int) (230 * (1f - ph)), 255, (int) (140 + 90 * (1f - ph)), 40));
             }
@@ -195,34 +228,31 @@ public class BerserkClient implements ClientModInitializer {
             int a = (int) (80 * Math.max(0f, MathHelper.sin(t * 0.9f)));
             ctx.fill(x, y, x + bw, y + bh, argb(a, 255, 255, 255));
         }
-        if (introFlash > 0) ctx.fill(x - 3, y - 3, x + bw + 3, y + bh + 3, argb(introFlash * 14, 255, 240, 200));
+        if (introFlash > 0) ctx.fill(x - 2, y - 2, x + bw + 2, y + bh + 2, argb(introFlash * 14, 255, 240, 200));
 
         // shine sweeping across the bar when the ability is ready again
         if (mode == 2) {
             float p = 1f - readyFlash / (float) READY_TICKS;
-            int sx = x + (int) (p * (bw + 30)) - 12;
-            int x1 = Math.max(sx, x), x2 = Math.min(sx + 8, x + bw);
+            int sx = x + (int) (p * (bw + 20)) - 8;
+            int x1 = Math.max(sx, x), x2 = Math.min(sx + 6, x + bw);
             if (x2 > x1) ctx.fill(x1, y, x2, y + bh, argb(120, 255, 255, 255));
         }
 
-        // text
+        // text sits INSIDE the bar so the HUD stays compact
         TextRenderer tr = mc.textRenderer;
-        int ty = y + bh + 5;
+        int cxText = x + bw / 2;
+        int ty = y + (bh - 8) / 2 + 1;
         if (mode == 0) {
-            int col = low ? argb(255, 255, (int) (80 + 150 * pulse), (int) (60 + 120 * pulse))
-                          : argb(255, 255, (int) (70 + 60 * pulse), 20);
-            ctx.drawTextWithShadow(tr, Text.literal("BERSERK").formatted(Formatting.BOLD), x, ty, col);
-            String s = String.format("%.1fs", Math.max(0f, remaining - pd) / 20f);
-            ctx.drawTextWithShadow(tr, s, x + bw - tr.getWidth(s), ty, 0xFFFFD27A);
+            int secs = (int) Math.ceil(Math.max(0f, remaining - pd) / 20f);
+            int col = low ? argb(255, 255, (int) (200 + 55 * pulse), (int) (170 + 85 * pulse)) : 0xFFFFFFFF;
+            ctx.drawCenteredTextWithShadow(tr, Text.literal("BERSERK " + secs + "s"), cxText, ty, col);
         } else if (mode == 1) {
-            ctx.drawTextWithShadow(tr, "RECHARGING", x, ty, 0xFF9A8F8F);
-            String s = (cooldown / 20 + 1) + "s";
-            ctx.drawTextWithShadow(tr, s, x + bw - tr.getWidth(s), ty, 0xFF9A8F8F);
+            ctx.drawCenteredTextWithShadow(tr, Text.literal("RECHARGE " + (cooldown / 20 + 1) + "s"), cxText, ty, 0xFFC9BDBD);
         } else {
             int a = readyFlash < 15 ? readyFlash * 255 / 15 : 255;
             if (a >= 8) {
-                ctx.drawCenteredTextWithShadow(tr, Text.literal("BERSERK READY").formatted(Formatting.BOLD),
-                        x + bw / 2, ty, argb(a, 255, (int) (190 + 50 * pulse), 60));
+                ctx.drawCenteredTextWithShadow(tr, Text.literal("READY").formatted(Formatting.BOLD),
+                        cxText, ty, argb(a, 255, (int) (200 + 40 * pulse), 90));
             }
         }
     }
